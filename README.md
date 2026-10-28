@@ -13,7 +13,10 @@ Mojang 官方客户端 jar 里只有 16×16 贴图，楼梯、台阶、栅栏、
 
 26.3 实测：1815 个方块/物品 id 里产出 **1751 个图标**（96.5%），剩下 64 个是 `air`、`light`、`moving_piston`、彩色床这类本身没有独立外观的 id。
 
-产物统一成 **96×96 透明画布**，命名与插件一致：`minecraft_<id>.png` / `.gif`，并额外生成 `material_icon_map.json`（`基础名 → 后缀`）。
+产物统一成 **96×96 透明画布**，命名与插件一致：`minecraft_<id>.png` / `.gif`，并额外生成两个映射表：
+
+- `material_icon_map.json`：`基础名 → 后缀`，插件用它拼图床地址
+- `item_mapping.json`：`minecraft:<id> → 中文名`，取自官方语言文件，含 `xxx_slab[type=double]` 双层台阶变体
 
 ## 快速开始
 
@@ -76,6 +79,7 @@ cp .env.example .env                            # 填上传参数（见下）
 | GET | `/healthz` | 存活 + 是否已就绪 |
 | GET | `/version` | 当前构建的 MC 版本、图标数、来源统计 |
 | GET | `/map` | `material_icon_map.json`，可直接替换插件里的同名文件 |
+| GET | `/items` | `item_mapping.json`，`minecraft:<id> → 中文名` |
 | GET | `/icons/{name}` | `minecraft_stone.png` 或简写 `stone` |
 | POST | `/refresh?force=true` | 立即检查更新/重建，配了 `REFRESH_TOKEN` 时需 `X-Token` 头 |
 
@@ -102,6 +106,8 @@ cp .env.example .env                            # 填上传参数（见下）
 | `MC_MIRROR_URL` | 空 | Mojang 镜像，如 `https://bmclapi2.bangbang93.com`；设置后清单/版本 json/jar 全走镜像 |
 | `SOURCES` | `wiki,jar` | 只留 `jar` 则完全离线、纯贴图（快，但合成方块没有图标） |
 | `ICON_SIZE` | `96` | 输出画布边长 |
+| `LANG_CODE` | `zh_cn` | `item_mapping.json` 的语言，`zh_cn`/`zh_tw`/`en_us` 等 |
+| `EMIT_ITEM_MAPPING` | `true` | 是否生成 `item_mapping.json` |
 | `CHECK_INTERVAL` | `21600` | 自动检查间隔（秒） |
 | `UPDATE_ON_START` | `true` | 启动时是否补建 |
 | `CONCURRENCY` | `4` | 并发上游请求数 |

@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
+from . import lang
 from .config import Settings
 from .wiki import WikiClient
 
@@ -176,6 +177,7 @@ async def build(
     jar_path: Path,
     client: httpx.AsyncClient,
     limit: int | None = None,
+    meta: dict | None = None,
 ) -> BuildResult:
     """Generate a complete icon set for one Minecraft version.
 
@@ -189,6 +191,7 @@ async def build(
         jar_path: Path of the client jar.
         client: Shared HTTP client.
         limit: Build only the first N ids, useful for smoke tests.
+        meta: Version document, needed to locate the language file.
 
     Returns:
         Summary of the build.
@@ -255,11 +258,41 @@ async def build(
                     len(missing),
                 )
 
+    item_count = 0
+    if settings.emit_item_mapping and meta and not limit:
+        try:
+            language = await lang.fetch_language(
+                client, meta, settings.lang_code, settings.mirror_url
+            )
+            mapping = lang.build_mapping(
+                language, {name.removeprefix("minecraft_") for name in icons}
+            )
+            if mapping:
+                (target / "item_mapping.json").write_text(
+                    json.dumps(
+                        {
+                            "version": version,
+                            "description": (
+                                f"Minecraft 物品/方块 ID 与名称映射（{settings.lang_code}），"
+                                "由 mc-icon-service 自动生成"
+                            ),
+                            "items": mapping,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                item_count = len(mapping)
+        except (httpx.HTTPError, OSError, ValueError, KeyError) as exc:
+            logger.warning("item_mapping.json skipped: %s", exc)
+
     index_payload = {
         "version": version,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "count": len(icons),
         "icon_size": settings.icon_size,
+        "items": item_count,
         "sources": stats,
         "icons": dict(sorted(icons.items())),
     }

@@ -182,6 +182,8 @@ class Settings:
         mirror_url: Optional Mojang mirror base, e.g. ``https://bmclapi2.bangbang93.com``.
         sources: Ordered icon sources, ``wiki`` renders first, ``jar`` textures second.
         icon_size: Square canvas size in pixels every icon is normalised to.
+        lang_code: Locale used for ``item_mapping.json``, e.g. ``zh_cn``.
+        emit_item_mapping: Write ``item_mapping.json`` next to the icons.
         check_interval: Seconds between two automatic version checks.
         update_on_start: Rebuild on startup when the cached build is missing or stale.
         refresh_token: When set, ``POST /refresh`` requires a matching ``X-Token`` header.
@@ -203,6 +205,8 @@ class Settings:
         )
     )
     icon_size: int = field(default_factory=lambda: int(os.getenv("ICON_SIZE", "96")))
+    lang_code: str = field(default_factory=lambda: os.getenv("LANG_CODE", "zh_cn"))
+    emit_item_mapping: bool = field(default_factory=lambda: _env_bool("EMIT_ITEM_MAPPING", True))
     check_interval: int = field(default_factory=lambda: int(os.getenv("CHECK_INTERVAL", "21600")))
     update_on_start: bool = field(default_factory=lambda: _env_bool("UPDATE_ON_START", True))
     refresh_token: str | None = field(default_factory=lambda: os.getenv("REFRESH_TOKEN") or None)

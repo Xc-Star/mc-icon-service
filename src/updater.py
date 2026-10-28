@@ -115,7 +115,7 @@ class Updater:
                     self._client, target, meta, self.settings.cache_dir, mirror
                 )
                 result = await builder.build(
-                    self.settings, target.id, jar_path, self._client, limit=limit
+                    self.settings, target.id, jar_path, self._client, limit=limit, meta=meta
                 )
 
                 if limit:

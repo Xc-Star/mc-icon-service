@@ -207,7 +207,7 @@ async def root() -> dict:
     """Describe the service and its endpoints."""
     return {
         "service": "mc-icon-service",
-        "endpoints": ["/healthz", "/version", "/map", "/icons/{name}", "/refresh"],
+        "endpoints": ["/healthz", "/readyz", "/version", "/map", "/items", "/icons/{name}"],
     }
 
 
@@ -256,6 +256,16 @@ async def icon_map(request: Request) -> JSONResponse:
     path = state.icons_dir() / "material_icon_map.json"
     if not path.is_file():
         raise HTTPException(status_code=503, detail="map is not ready yet")
+    return JSONResponse(content=json.loads(path.read_text(encoding="utf-8")))
+
+
+@app.get("/items")
+async def item_mapping(request: Request) -> JSONResponse:
+    """Return the ``id -> display name`` map used by the AstrBot plugin."""
+    state = _state(request)
+    path = state.icons_dir() / "item_mapping.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="item mapping was not generated")
     return JSONResponse(content=json.loads(path.read_text(encoding="utf-8")))
 
 
