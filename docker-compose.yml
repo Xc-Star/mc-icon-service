@@ -1,0 +1,14 @@
+services:
+  mc-icon-service:
+    build: .
+    image: mc-icon-service
+    container_name: mc-icons
+    restart: unless-stopped
+    # ports:
+    #   - "8618:8618"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    # 宿主机用户不是 uid 1000 时，取消注释并把文件所有者对齐，避免挂载目录写成 root
+    # user: "1000:1000"
