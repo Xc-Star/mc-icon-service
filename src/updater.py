@@ -95,8 +95,9 @@ class Updater:
             self._busy = True
             try:
                 selector = version or self.settings.mc_version
-                manifest = await mojang.fetch_manifest(self._client)
-                target = mojang.pick_version(manifest, selector)
+                mirror = self.settings.mirror_url
+                manifest = await mojang.fetch_manifest(self._client, mirror)
+                target = mojang.pick_version(manifest, selector, mirror)
 
                 if not force and self.state and self.state.version == target.id:
                     if self.state.is_usable():
@@ -111,7 +112,7 @@ class Updater:
                 logger.info("building icons for Minecraft %s (%s)", target.id, target.type)
                 meta = await mojang.fetch_version_meta(self._client, target)
                 jar_path = await mojang.ensure_client_jar(
-                    self._client, target, meta, self.settings.cache_dir
+                    self._client, target, meta, self.settings.cache_dir, mirror
                 )
                 result = await builder.build(
                     self.settings, target.id, jar_path, self._client, limit=limit
@@ -193,7 +194,16 @@ class Updater:
         """Check for new releases on a fixed interval."""
         while True:
             try:
-                await asyncio.sleep(self.settings.check_interval)
+                # when nothing is built yet, retry quickly instead of waiting a full interval
+                if self.state and self.state.is_usable():
+                    delay = self.settings.check_interval
+                    logger.info(
+                        "next version check in %s", _human_interval(self.settings.check_interval)
+                    )
+                else:
+                    delay = 300
+                    logger.info("no usable build yet, retrying in 5m")
+                await asyncio.sleep(delay)
                 logger.info(
                     "scheduled check for a new Minecraft release (every %s)",
                     _human_interval(self.settings.check_interval),

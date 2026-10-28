@@ -179,6 +179,7 @@ class Settings:
         host: Bind address for the HTTP server.
         port: Bind port for the HTTP server.
         mc_version: Version selector, either ``latest``, ``latest-snapshot`` or an id.
+        mirror_url: Optional Mojang mirror base, e.g. ``https://bmclapi2.bangbang93.com``.
         sources: Ordered icon sources, ``wiki`` renders first, ``jar`` textures second.
         icon_size: Square canvas size in pixels every icon is normalised to.
         check_interval: Seconds between two automatic version checks.
@@ -193,6 +194,9 @@ class Settings:
     host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(os.getenv("PORT", "8618")))
     mc_version: str = field(default_factory=lambda: os.getenv("MC_VERSION", "latest"))
+    mirror_url: str = field(
+        default_factory=lambda: os.getenv("MC_MIRROR_URL", "").rstrip("/")
+    )
     sources: tuple[str, ...] = field(
         default_factory=lambda: tuple(
             s.strip().lower() for s in os.getenv("SOURCES", "wiki,jar").split(",") if s.strip()

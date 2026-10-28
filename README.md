@@ -99,6 +99,7 @@ cp .env.example .env                            # 填上传参数（见下）
 | `DATA_DIR` | `./data` | 缓存、构建产物、状态文件 |
 | `PORT` / `HOST` | `8618` / `0.0.0.0` | 监听地址 |
 | `MC_VERSION` | `latest` | `latest`、`latest-snapshot` 或具体版本号 |
+| `MC_MIRROR_URL` | 空 | Mojang 镜像，如 `https://bmclapi2.bangbang93.com`；设置后清单/版本 json/jar 全走镜像 |
 | `SOURCES` | `wiki,jar` | 只留 `jar` 则完全离线、纯贴图（快，但合成方块没有图标） |
 | `ICON_SIZE` | `96` | 输出画布边长 |
 | `CHECK_INTERVAL` | `21600` | 自动检查间隔（秒） |
@@ -126,6 +127,26 @@ cp .env.example .env                            # 填上传参数（见下）
 - `/healthz`、`/readyz` 只在 `LOG_LEVEL=DEBUG` 下记录，否则 30 秒一条会把日志刷满。
 - 构建期间每 100 个 id 打一条进度，包含 wiki/jar 来源计数和缺失数。
 - 定时检查会打「下次检查时间」和「检查耗时 + 结果」；手动 `POST /refresh` 也会留一条记录。
+
+## 排查
+
+### 日志停在 `building icons for Minecraft ...` 不动了
+
+启动构建跑在后台 task 里，**早期版本会把异常吞掉**（`asyncio.create_task` 不 await 就看不到异常），表现就是日志卡住。现在的版本会打完整 traceback、重试 3 次，之后交给后台每 5 分钟重试一次。看到 `startup build attempt 1/3 failed` 后往下翻 traceback 即可。
+
+按频率排的三个原因：
+
+1. **data 目录不可写**（Docker bind mount 属主不是 uid 1000）。日志会直接给出：
+   ```
+   ERROR src.server  data dir /app/data is not writable (uid=1000): [Errno 13] Permission denied
+   ```
+   解决：`sudo chown -R 1000:1000 ./data`，或启动时加 `--user $(id -u):$(id -g)`。
+2. **连不上 Mojang**。先验证：
+   ```bash
+   docker exec mc-icons python -c "import httpx; print(httpx.get('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json', timeout=10).status_code)"
+   ```
+   不通就加 `MC_MIRROR_URL=https://bmclapi2.bangbang93.com`（清单、版本 json、jar 全走镜像，sha1 校验不变）。
+3. **磁盘满或挂载路径不对**。明明构建过却提示 `no usable build on disk`，检查 `data/state.json` 和 `data/icons-*` 是否真的在挂载目录里。
 
 ## 部署
 

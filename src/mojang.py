@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 USER_AGENT = "mc-icon-service/1.0 (+https://github.com/xc-star)"
+# Fail fast instead of hanging when the host is unreachable.
+TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 
 
 @dataclass(slots=True)
@@ -30,29 +32,46 @@ class VersionInfo:
     meta_url: str
 
 
-async def fetch_manifest(client: httpx.AsyncClient) -> dict:
+def manifest_url(mirror: str = "") -> str:
+    """Build the version manifest URL.
+
+    Args:
+        mirror: Optional mirror base such as ``https://bmclapi2.bangbang93.com``.
+
+    Returns:
+        The manifest URL to fetch.
+    """
+    return f"{mirror}/mc/game/version_manifest_v2.json" if mirror else MANIFEST_URL
+
+
+async def fetch_manifest(client: httpx.AsyncClient, mirror: str = "") -> dict:
     """Fetch the version manifest.
 
     Args:
         client: Shared HTTP client.
+        mirror: Optional mirror base, see :func:`manifest_url`.
 
     Returns:
         The decoded manifest document.
 
     Raises:
-        httpx.HTTPStatusError: When Mojang returns a non-2xx response.
+        httpx.HTTPError: When the host is unreachable or returns an error.
     """
-    response = await client.get(MANIFEST_URL, headers={"User-Agent": USER_AGENT})
+    url = manifest_url(mirror)
+    logger.info("fetching version manifest from %s", url)
+    response = await client.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
     response.raise_for_status()
     return response.json()
 
 
-def pick_version(manifest: dict, selector: str) -> VersionInfo:
+def pick_version(manifest: dict, selector: str, mirror: str = "") -> VersionInfo:
     """Pick a version from the manifest.
 
     Args:
         manifest: Manifest document returned by :func:`fetch_manifest`.
         selector: ``latest``, ``latest-snapshot`` or an explicit version id.
+        mirror: Optional mirror base; when set the per-version document is read
+            from the mirror instead of Mojang.
 
     Returns:
         The matching version.
@@ -69,7 +88,10 @@ def pick_version(manifest: dict, selector: str) -> VersionInfo:
 
     for entry in manifest.get("versions", []):
         if entry["id"] == wanted:
-            return VersionInfo(id=entry["id"], type=entry["type"], meta_url=entry["url"])
+            meta_url = (
+                f"{mirror}/version/{entry['id']}/json" if mirror else entry["url"]
+            )
+            return VersionInfo(id=entry["id"], type=entry["type"], meta_url=meta_url)
     raise ValueError(f"unknown Minecraft version: {selector}")
 
 
@@ -83,13 +105,20 @@ async def fetch_version_meta(client: httpx.AsyncClient, version: VersionInfo) ->
     Returns:
         The decoded version document, which contains download URLs.
     """
-    response = await client.get(version.meta_url, headers={"User-Agent": USER_AGENT})
+    logger.info("fetching version metadata for %s", version.id)
+    response = await client.get(
+        version.meta_url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT
+    )
     response.raise_for_status()
     return response.json()
 
 
 async def ensure_client_jar(
-    client: httpx.AsyncClient, version: VersionInfo, meta: dict, cache_dir: Path
+    client: httpx.AsyncClient,
+    version: VersionInfo,
+    meta: dict,
+    cache_dir: Path,
+    mirror: str = "",
 ) -> Path:
     """Download the client jar once and reuse it afterwards.
 
@@ -101,6 +130,7 @@ async def ensure_client_jar(
         version: Version being built.
         meta: Version document returned by :func:`fetch_version_meta`.
         cache_dir: Directory that keeps jars between runs.
+        mirror: Optional mirror base used for the jar download.
 
     Returns:
         Path of the cached jar.
@@ -120,12 +150,19 @@ async def ensure_client_jar(
         logger.info("client jar cache hit: %s", jar_path.name)
         return jar_path
 
+    jar_url = f"{mirror}/version/{version.id}/client" if mirror else download["url"]
     logger.info(
-        "downloading client jar %s (%.1f MB)", version.id, download["size"] / 1048576
+        "downloading client jar %s (%.1f MB) from %s",
+        version.id,
+        download["size"] / 1048576,
+        jar_url,
     )
     tmp_path = jar_path.with_suffix(".part")
     async with client.stream(
-        "GET", download["url"], headers={"User-Agent": USER_AGENT}, timeout=300
+        "GET",
+        jar_url,
+        headers={"User-Agent": USER_AGENT},
+        timeout=httpx.Timeout(300.0, connect=15.0),
     ) as response:
         response.raise_for_status()
         with tmp_path.open("wb") as handle:

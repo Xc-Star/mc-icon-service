@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +35,24 @@ async def lifespan(app: FastAPI):
         settings.concurrency,
         settings.check_interval,
     )
+    if settings.mirror_url:
+        logger.info("using Mojang mirror: %s", settings.mirror_url)
+
+    # A read-only data dir (common with bind mounts owned by another uid) would
+    # otherwise fail inside the background build and leave no trace in the log.
+    try:
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        probe = settings.data_dir / ".write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        logger.error(
+            "data dir %s is not writable (uid=%s): %s",
+            settings.data_dir.resolve(),
+            os.getuid() if hasattr(os, "getuid") else "?",
+            exc,
+        )
+
     logger.info(
         "upload: %s -> %s (channel=%s, channel_name=%s, folder=%s, name_type=%s, skip_existing=%s)",
         "enabled" if upload.enabled else "disabled",
@@ -63,13 +82,34 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("no usable build on disk, a full build will start now")
 
-    app.state.warmup = asyncio.create_task(updater.ensure_ready())
+    app.state.warmup = asyncio.create_task(_warmup(updater))
     updater.start()
     try:
         yield
     finally:
         logger.info("shutting down mc-icon-service")
         await updater.close()
+
+
+async def _warmup(updater: Updater) -> None:
+    """Run the startup build, logging and retrying instead of dying silently.
+
+    ``asyncio.create_task`` swallows exceptions until the task is awaited, which
+    used to leave the container "stuck" right after the first build log line.
+
+    Args:
+        updater: Updater instance owned by the app.
+    """
+    for attempt in range(1, 4):
+        try:
+            await updater.ensure_ready()
+            return
+        except Exception:
+            logger.exception("startup build attempt %d/3 failed", attempt)
+            if attempt < 3:
+                logger.info("retrying startup build in 30s")
+                await asyncio.sleep(30)
+    logger.error("startup build gave up, the background loop will retry in 5 minutes")
 
 
 app = FastAPI(title="Minecraft icon service", version="1.0.0", lifespan=lifespan)
