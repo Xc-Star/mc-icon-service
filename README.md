@@ -138,9 +138,15 @@ cp .env.example .env                            # 填上传参数（见下）
 
 1. **data 目录不可写**（Docker bind mount 属主不是 uid 1000）。日志会直接给出：
    ```
-   ERROR src.server  data dir /app/data is not writable (uid=1000): [Errno 13] Permission denied
+   ERROR src.server  data dir /app/data is not writable (running as 1000:1000): [Errno 13] Permission denied: 'data/.write-probe'
+   ERROR src.server  fix on the host: sudo chown -R 1000:1000 <path bind-mounted to ./data>, or start the container with --user $(id -u):$(id -g)
+   ERROR src.server  skipping build: nothing can be written until the data dir is fixed, restart the container after chown
    ```
-   解决：`sudo chown -R 1000:1000 ./data`，或启动时加 `--user $(id -u):$(id -g)`。
+   这种情况服务会**停止尝试构建**（不会每 5 分钟刷一次 traceback），修完属主后重启容器即可：
+   ```bash
+   sudo chown -R 1000:1000 ./data     # 或者 docker compose 里放开 user: "$(id -u):$(id -g)"
+   docker compose restart
+   ```
 2. **连不上 Mojang**。先验证：
    ```bash
    docker exec mc-icons python -c "import httpx; print(httpx.get('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json', timeout=10).status_code)"

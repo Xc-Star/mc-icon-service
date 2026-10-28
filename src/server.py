@@ -40,17 +40,29 @@ async def lifespan(app: FastAPI):
 
     # A read-only data dir (common with bind mounts owned by another uid) would
     # otherwise fail inside the background build and leave no trace in the log.
+    writable = True
     try:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         probe = settings.data_dir / ".write-probe"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except OSError as exc:
+        writable = False
+        uid = os.getuid() if hasattr(os, "getuid") else "?"
+        gid = os.getgid() if hasattr(os, "getgid") else "?"
         logger.error(
-            "data dir %s is not writable (uid=%s): %s",
+            "data dir %s is not writable (running as %s:%s): %s",
             settings.data_dir.resolve(),
-            os.getuid() if hasattr(os, "getuid") else "?",
+            uid,
+            gid,
             exc,
+        )
+        logger.error(
+            "fix on the host: sudo chown -R %s:%s <path bind-mounted to %s>, "
+            "or start the container with --user $(id -u):$(id -g)",
+            uid,
+            gid,
+            settings.data_dir,
         )
 
     logger.info(
@@ -80,10 +92,18 @@ async def lifespan(app: FastAPI):
             Path(updater.state.directory).resolve(),
         )
     else:
-        logger.info("no usable build on disk, a full build will start now")
+        logger.warning("no usable build on disk")
 
-    app.state.warmup = asyncio.create_task(_warmup(updater))
-    updater.start()
+    if not writable:
+        logger.error(
+            "skipping build: nothing can be written until the data dir is fixed, "
+            "restart the container after chown"
+        )
+    else:
+        if not (updater.state and updater.state.is_usable()):
+            logger.info("starting a full build in the background, this takes ~16 minutes")
+        app.state.warmup = asyncio.create_task(_warmup(updater))
+        updater.start()
     try:
         yield
     finally:
@@ -103,6 +123,11 @@ async def _warmup(updater: Updater) -> None:
     for attempt in range(1, 4):
         try:
             await updater.ensure_ready()
+            return
+        except OSError as exc:
+            # filesystem problems never heal by retrying, and the traceback
+            # would just repeat every 5 minutes in the background loop
+            logger.error("startup build aborted, filesystem error: %s", exc)
             return
         except Exception:
             logger.exception("startup build attempt %d/3 failed", attempt)
